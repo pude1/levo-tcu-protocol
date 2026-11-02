@@ -1,0 +1,64 @@
+menu "Levo TCU ride features"
+
+config LEVO_RIDE_IMU
+    bool "Use the onboard QMI8658 IMU (terrain AUTO assist, trick challenges)"
+    default y
+    help
+        Without an IMU, or with this disabled, the controller behaves like the
+        reference: Off/Eco/Trail/Turbo/Walk only.
+
+choice LEVO_IMU_FORWARD
+    prompt "IMU axis that points towards the front of the bike"
+    default LEVO_IMU_FORWARD_NEG_Y
+    help
+        Board-dependent. Find it with tools/imu_orientation.py: log while lifting
+        the front wheel; the axis whose acceleration rises is forward. Mounting
+        tilt does not matter after the level calibration.
+config LEVO_IMU_FORWARD_POS_X
+    bool "+X"
+config LEVO_IMU_FORWARD_NEG_X
+    bool "-X"
+config LEVO_IMU_FORWARD_POS_Y
+    bool "+Y"
+config LEVO_IMU_FORWARD_NEG_Y
+    bool "-Y"
+endchoice
+
+config LEVO_IMU_FORWARD_AXIS
+    int
+    default 0 if LEVO_IMU_FORWARD_POS_X
+    default 1 if LEVO_IMU_FORWARD_NEG_X
+    default 2 if LEVO_IMU_FORWARD_POS_Y
+    default 3 if LEVO_IMU_FORWARD_NEG_Y
+
+config LEVO_IMU_UP_AXIS
+    int "IMU up axis before calibration (0: +Z, 1: -Z)"
+    range 0 1
+    default 0
+
+config LEVO_RIDE_LOG_HZ
+    int "Ride status log rate over USB (0 disables)"
+    range 0 50
+    default 5
+
+config LEVO_RIDE_RAW_LOG
+    bool "Log every raw IMU sample over USB (for tools/ride_replay.py; may drop lines)"
+    default n
+
+config LEVO_LOOPOUT_GUARD_DEG
+    int "Loop-out guard: drop to Eco above this wheelie angle (0 = off)"
+    range 0 80
+    default 0
+    help
+        Experimental and off by default. A sudden assist change mid-wheelie can
+        surprise the rider; enable only after testing on your own bike.
+
+config LEVO_SNIFF_ONLY
+    bool "Sniff-only build: listen-only CAN, never transmit (use beside the stock TCU)"
+    default n
+    help
+        For checking a different bike (e.g. Kenevo) against the documented
+        protocol, and for trying the ride features while the stock TCU controls
+        the motor. Requires a passive tap on CAN H/L and a separate 5 V supply.
+
+endmenu

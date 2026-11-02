@@ -23,6 +23,9 @@ unsigned ui_requested(ui_action_t a, unsigned m) {
 }
 
 ui_action_t ui_hold_action(ui_action_t pressed, int64_t held_us) {
-    return held_us >= 2000000 && (pressed == UI_MINUS || pressed == UI_SHUTDOWN) ? UI_SHUTDOWN
-                                                                                 : UI_NONE;
+    if (held_us >= 2000000 && (pressed == UI_MINUS || pressed == UI_SHUTDOWN))
+        return UI_SHUTDOWN;
+    if (held_us >= 3000000 && pressed == UI_PLUS)
+        return UI_CALIBRATE;
+    return UI_NONE;
 }

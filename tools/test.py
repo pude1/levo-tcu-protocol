@@ -14,11 +14,12 @@ os.chdir(ROOT)
 build = ROOT / '.build-tests'
 build.mkdir(exist_ok=True)
 compiler = os.environ.get('CC', 'cc')
-flags = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-Iprotocol', '-Ifirmware/main']
+flags = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-Iprotocol', '-Iride', '-Ifirmware/main']
 if not a.no_sanitizers:
     flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
 # Only the standalone policy is linked. The old USB-lease bench policy is not shipped.
 sources = [str(p) for p in sorted((ROOT/'protocol').glob('*.c'))]
+sources += [str(p) for p in sorted((ROOT/'ride').glob('*.c'))]
 sources += [
     'firmware/main/remote_buttons.c', 'firmware/main/walk_test.c',
     'firmware/main/standalone_control.c', 'firmware/main/touch_policy.c',

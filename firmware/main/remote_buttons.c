@@ -38,6 +38,7 @@ bool remote_buttons_poll(remote_buttons_t *s, uint64_t now, unsigned pressed, bo
     s->released = false;
     if (!allow || current > 3)
         return false;
+    s->event = pressed;
     if (pressed == 1)
         *requested = current < 3 ? current + 1 : 3;
     else if (pressed == 2) {

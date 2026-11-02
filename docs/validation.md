@@ -24,6 +24,20 @@ Requires Python 3 and a C11 compiler. C tests use AddressSanitizer and Undefined
 
 This revision passes 11 C test programs and 9 Python tests. The reference firmware also builds with ESP-IDF 5.4.2. Neither check verifies hardware timing, GPIO contacts, power stability or motor acceptance. This build has not had a workstand check on the final assembly.
 
+## Fork additions (ride features)
+
+* `tests/ride_check.c` drives the whole ride pipeline with synthetic 200 Hz IMU data, noise,
+  gyro bias and 20 Hz CAN speed. It checks: grade on 8/16/−12 % within 1.5–2 %; 2 m/s²
+  acceleration on the flat not reading as a climb; AUTO Eco→Trail→Turbo→Eco; a steady 30 %
+  ramp not counted as a wheelie; wheelie, manual, endo, bunny hop (height) and a 180 jump;
+  AUTO frozen during tricks and with an invalid IMU; no level hunting on rollers.
+* `tests/test_ride_replay.py` runs a synthetic USB log through `tools/ride_replay.py`.
+* Firmware builds with ESP-IDF 5.4.2 for the default, sniff-only, loop-out-guard + raw-log,
+  and IMU-disabled configurations.
+* **Not done:** any run on hardware, including reading the QMI8658, the axis orientation, the
+  touch/IMU bus sharing under load, real trick signatures, and Kenevo compatibility.
+  Synthetic data checks the logic, not the thresholds.
+
 ## Known limits
 
 - All eight startup diagnostic reads are required. An unsupported DID, timeout or negative response stops startup. Response-pending is not supported.

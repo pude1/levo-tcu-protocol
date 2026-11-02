@@ -8,6 +8,8 @@ This is a simplified source build, not an untouched archive binary. The saved sc
 
 Hardware: **Waveshare ESP32-C6-Touch-LCD-1.47**, 8 MiB flash, external 3.3 V CAN transceiver. Toolchain: **ESP-IDF 5.4.2**. Follow [Espressif's setup guide](https://docs.espressif.com/projects/esp-idf/en/v5.4.2/esp32c6/get-started/index.html), then export the IDF environment.
 
+Ride options are under `idf.py menuconfig` → *Levo TCU ride features* (IMU axis, logging, sniff-only, loop-out guard).
+
 ```sh
 cd firmware
 idf.py build
@@ -15,7 +17,7 @@ idf.py build
 idf.py -p YOUR_SERIAL_PORT flash monitor
 ```
 
-Select the actual serial port, for example `/dev/cu.usbmodem…` on macOS. Version: `levo-tcu-0.4.0-reference`. Output: `build/levo_tcu_standalone.bin`.
+Select the actual serial port, for example `/dev/cu.usbmodem…` on macOS. Version: `levo-tcu-0.5.0-ride` (fork; upstream is `0.4.0-reference`). Output: `build/levo_tcu_standalone.bin`.
 
 Flash the complete build through USB, including its bootloader and partition table. This layout uses one factory application and has no OTA slots. **Do not upload this binary through an earlier build’s over-the-air updater. It removes wireless servicing.** Existing saved app settings are ignored; no erase-flash step is needed. Keep the USB port reachable; it is the only way to reflash.
 
@@ -29,6 +31,8 @@ Flash the complete build through USB, including its bootloader and partition tab
 | Hold − for two seconds, remote or screen | Off, then shutdown |
 | Hold the screen's colored header for two seconds | Off, then shutdown |
 | Hold Walk on the remote | Walk from Off; release to stop |
+| Specialized button at Turbo (fork) | AUTO terrain assist; +/− then bias the map; Specialized leaves AUTO. See [ride features](ride-features.md#controls-additions-to-buildmd) |
+| Hold + on the screen for 3 s (fork) | IMU level calibration; bike still on level ground |
 
 Release the remote before selecting assistance. Walk requires a released input before it can start. Assistance stays Off until startup and the eight diagnostic reads finish. Touch gestures begun before readiness are discarded. There is no settings menu or inactivity timer.
 
