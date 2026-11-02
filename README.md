@@ -1,17 +1,107 @@
 # Levo TCU Protocol: ride fork (IMU terrain assist and trick challenges)
 
 > **This is a fork** of [setha-maker/levo-tcu-protocol](https://github.com/setha-maker/levo-tcu-protocol).
-> It keeps the upstream protocol, hardware and safety design, and adds a ride layer that uses the
-> **QMI8658 IMU already on the Waveshare board**. No extra parts are needed:
->
-> * **AUTO assist**: Eco/Trail/Turbo chosen from the terrain grade. It uses only the validated profiles.
-> * **Trick challenges**: wheelie, manual, endo, bunny hop, jump and 180/360, with medals and personal bests.
-> * **Sniff-only build and capture checker**: verify a different bike (e.g. a **Turbo Kenevo**) before replacing its TCU.
->
-> Start with [ride features](docs/ride-features.md), [IMU hardware options](hardware/imu-options.md)
-> and [Kenevo notes](docs/kenevo.md). Status: builds with ESP-IDF 5.4.2 and passes the host tests,
-> including synthetic rides. It has **not been ridden**.
+> It keeps the upstream protocol, hardware and safety design unchanged and adds a ride layer on top.
+> Everything below "What this is" is the upstream README.
 
+## Fork: ride features at a glance
+
+| Feature | What it does | Extra hardware |
+|---|---|---|
+| **AUTO assist** | Chooses Eco/Trail/Turbo from the terrain grade; +/− shift the map by one level | None (onboard QMI8658 IMU) |
+| **Trick challenges** | Wheelie, manual, endo, bunny hop (height), jump, 180/360, with bronze/silver/gold medals and personal bests | None |
+| **Sniff-only build** | Listen-only CAN: try the ride features and check a different bike while the stock TCU stays in charge | A CAN tap and USB power |
+| **Replay and tuning tools** | Replay recorded rides on a computer through the same C code; find the IMU axis | None |
+
+**Status:** builds with ESP-IDF 5.4.2 and passes all host tests, including synthetic rides.
+It has **not been run on a bike**. Thresholds are starting values.
+
+### Quick start
+
+1. Build the reference hardware from [hardware/README.md](hardware/README.md). The IMU is already on the Waveshare board.
+2. **Different bike (e.g. Kenevo)?** Flash the sniff-only build first and run `tools/compare_capture.py` on a log. See [docs/kenevo.md](docs/kenevo.md).
+3. Find the IMU forward axis with `tools/imu_orientation.py` (2 minutes, see [ride features → setup](docs/ride-features.md#setup)).
+4. On the bike, standing level and still: hold **+** on the screen for 3 s to calibrate.
+5. Ride with the Specialized button: Off → Eco → Trail → Turbo → **AUTO**.
+
+### How it fits together
+
+```
+QMI8658 IMU (224 Hz, I2C 0x6B)                 CAN 0x201 speed / 0x203 cadence
+        │                                                  │
+        └──────────► ride/attitude.c ◄─────────────────────┘
+                     pitch, roll, yaw rate, |g|, terrain grade
+                        │                          │
+               ride/tricks.c                ride/terrain_assist.c
+          wheelie/manual/endo/hop/jump      grade → Eco/Trail/Turbo
+                        │                          │
+               ride/challenges.c          firmware CAN loop → bench_send() allowlist
+           medals, PBs, points (NVS)        (same path as the buttons)
+```
+
+`ride/` is portable C with no ESP-IDF dependency, like `protocol/`. The firmware glue is
+`firmware/main/qmi8658.c`, `ride_task.c` and `board_i2c.c`.
+
+### Design notes
+
+These are the choices that matter most for safety and for how it feels to ride.
+
+* **The IMU only advises.** AUTO picks among the three captured profiles through the same
+  `tcu_bench_select()` / `bench_send()` path as manual selection. It never selects Off or a
+  new support/peak value. If the IMU fails, AUTO exits, the current level stays, and the CAN
+  controller carries on normally.
+* **A bike accelerometer rarely measures just gravity.** Pitch is corrected with the
+  rear-wheel speed derivative, with the accelerometer delayed by the same filter lag so the
+  two cancel. Roll uses the coordinated-turn lean, atan(v·yaw rate/g), because lateral
+  acceleration is roughly zero in a turn. Without this, 2 m/s² of acceleration would read as
+  a 20 % climb.
+* **AUTO doesn't change level at the wrong moment.** It holds its level during tricks, in the
+  air, under hard braking (fork dive), and while the IMU is untrusted. It shifts up after
+  0.8 s and down after 3 s, with ±0.75 % hysteresis. A +/− press applies at once.
+* **The terrain baseline freezes during tricks**, so a wheelie on a 10 % climb is measured
+  from the climb. A pitch that stays steady for 2.5 s counts as a new slope, not a balance
+  point. That rejects steep ramps.
+* **No flash writes while CAN runs.** On the single-core ESP32-C6 an NVS write can stall
+  for tens of milliseconds and break the 50 ms command schedule. Calibration and personal
+  bests are saved after the shutdown sequence.
+* **Real-time priorities:** the CAN loop runs at priority 5 and the IMU task at 3, sharing the
+  I2C bus with touch through the IDF bus lock.
+* **Loop-out guard** (drop to Eco above a set wheelie angle) is available but **off by default**:
+  a sudden assist change mid-wheelie can surprise the rider.
+
+### Recommendations
+
+* Mount the board **rigidly** in the bezel. A rattling board shows up as fake air time.
+* Calibrate on a floor you know is flat. Every 1 % of slope during calibration becomes a 1 %
+  grade offset.
+* **Kenevo:** 2020+ models share the Levo's 2.1 motor, M2 battery and top-tube TCU, which is
+  promising but unverified. Sniff before you replace anything. All eight startup diagnostic
+  reads must succeed or the controller stops safely.
+* Tune from your own rides: record with `CONFIG_LEVO_RIDE_RAW_LOG=y`, then run
+  `python3 tools/ride_replay.py ride.log --trace`, edit `ride/*.c`, and run
+  `python3 tools/test.py` before flashing.
+* Do the first powered tests on a workstand with the rear wheel clear, as upstream says.
+
+### Roadmap
+
+| Idea | Why | Notes |
+|---|---|---|
+| Barometer fusion (BMP581/BMP390 + CAN odometer) | Grade that doesn't drift and isn't affected by sag or calibration error | [IMU options B](hardware/imu-options.md#option-b-barometer-for-drift-free-grade-optional-upgrade) |
+| Fork-unload sensor | Tells a real wheelie from a steep ramp, and an endo from a roll-in | [IMU options C](hardware/imu-options.md#option-c-front-wheel-unload-sensor-robust-trick-classification) |
+| Threshold tuning from real Kenevo rides | Thresholds are currently based on synthetic data | Share logs or results as issues |
+| Challenge modes (timed runs, combos such as manual → hop) | More game, same detector | `ride/challenges.c` |
+| Grade-dependent support curve | Smoother than three steps | Needs CAN validation of intermediate support/peak values first |
+
+### Fork documentation
+
+| Doc | Contents |
+|---|---|
+| [docs/ride-features.md](docs/ride-features.md) | Controls, AUTO map, detection thresholds, setup, tuning, safety, limits |
+| [hardware/imu-options.md](hardware/imu-options.md) | Onboard IMU details, mounting, barometer and fork-sensor upgrades |
+| [docs/kenevo.md](docs/kenevo.md) | Kenevo differences and the sniff-first procedure |
+| [docs/validation.md](docs/validation.md#fork-additions-ride-features) | What is tested and what isn't |
+
+---
 
 ## What this is
 
