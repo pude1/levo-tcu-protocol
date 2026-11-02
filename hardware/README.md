@@ -81,7 +81,7 @@ Disconnect the buck's 5 V link before powering through USB. This assembly has no
 
 ## Printed parts
 
-[`base.stl`](3d-print/base.stl) and [`shroud.stl`](3d-print/shroud.stl) are the supplied reference parts. STL bounding boxes are 87.2 × 33 × 13 mm for the base and 71.7 × 30 × 11.7 mm for the shroud. Check fit against your frame opening and display before permanent assembly.
+[`base.stl`](3d-print/base.stl) and [`shroud.stl`](3d-print/shroud.stl) are the supplied reference parts. A **parametric rebuild** with STEP exports is in [`cad/`](cad/README.md). STL bounding boxes are 87.2 × 33 × 13 mm for the base and 71.7 × 30 × 11.7 mm for the shroud. Check fit against your frame opening and display before permanent assembly.
 
 The rubber cap and momentary switch were salvaged from other projects and are not supplied by these models. Fabricate a suitable button assembly or adapt the design. A handlebar power-button alternative would require separate electrical validation; it is not implemented here. Heat shrink and a printed shroud do not establish an ingress-protection rating.
 
