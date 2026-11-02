@@ -170,6 +170,12 @@ static void off_attempt(bool wait_for_wake) {
     walk_test_t walk = {0};
     remote_buttons_t remote;
     remote_buttons_reset(&remote, boot);
+    /* Terrain AUTO only picks among the validated Eco/Trail/Turbo profiles above. */
+    terrain_assist_t terrain = {0};
+    terrain_cfg_t terrain_cfg;
+    terrain_cfg_default(&terrain_cfg);
+    bool shown_auto = false;
+    int shown_bias = 0;
 
     const uint8_t off[7] = {0, 0x5a, 0x64, 0x5a, 0, 0, 10};
     if (!tcu_seq_start(&seq, off, boot)) {
@@ -196,6 +202,8 @@ static void off_attempt(bool wait_for_wake) {
             }
             if (!rx.extd && !rx.rtr && rx.identifier == 0x201 && rx.data_length_code == 6)
                 last_motor = now;
+            if (!rx.extd && !rx.rtr)
+                ride_task_can(rx.identifier, rx.data, rx.data_length_code, now);
             if (!rx.extd && !rx.rtr)
                 tcu_diag_receive(&diag, now / 1000, rx.identifier, rx.data, rx.data_length_code);
         }
@@ -242,11 +250,40 @@ static void off_attempt(bool wait_for_wake) {
          * or Walk transitions. The remote must be fully released to re-arm. */
         bool input_enabled = ready && !control.stopping && !walking_now && !was_walking;
         unsigned requested = control.mode;
-        if (remote_buttons_poll(&remote, sample_now, wb.stable, input_enabled && fresh,
-                                control.mode, &requested)) {
+        ride_status_t ride = ride_task_status();
+        bool ride_usable = LEVO_RIDE_ENABLED && ride.imu_ok;
+        remote.event = 0;
+        bool remote_changed = remote_buttons_poll(&remote, sample_now, wb.stable,
+                                                  input_enabled && fresh, control.mode, &requested);
+        unsigned event = remote.event;
+        if (event)
             walk.armed = false;
-            tcu_bench_select(&control, now, last_motor, ready, requested);
+        if (terrain.enabled && event) {
+            /* In AUTO: +/- shift the terrain map one level, Specialized leaves AUTO. */
+            remote_changed = false;
+            if (event == 1) {
+                terrain_assist_bias(&terrain, now, +1);
+            } else if (event == 2) {
+                if (terrain.bias < 0 && terrain.level == 1) {
+                    terrain_assist_disable(&terrain);
+                    requested = 0;
+                    remote_changed = true;
+                } else {
+                    terrain_assist_bias(&terrain, now, -1);
+                }
+            } else if (event == 8) {
+                terrain_assist_disable(&terrain);
+                requested = 1;
+                remote_changed = true;
+            }
+        } else if (event == 8 && control.mode == 3 && ride_usable && input_enabled) {
+            /* Specialized cycle: Off -> Eco -> Trail -> Turbo -> AUTO -> Eco ... */
+            terrain_assist_enable(&terrain, now, control.mode);
+            remote_changed = false;
+            puts("{\"type\":\"auto_assist\",\"enabled\":true}");
         }
+        if (remote_changed)
+            tcu_bench_select(&control, now, last_motor, ready, requested);
         if (remote.shutdown)
             tcu_bench_stop(&control, now);
         ui_action_t action;
@@ -256,9 +293,42 @@ static void off_attempt(bool wait_for_wake) {
             walk.armed = false;
             if (action == UI_SHUTDOWN)
                 tcu_bench_stop(&control, now);
+            else if (action == UI_CALIBRATE)
+                ride_task_request_calibration();
+            else if (terrain.enabled && (action == UI_PLUS || action == UI_MINUS))
+                terrain_assist_bias(&terrain, now, action == UI_PLUS ? +1 : -1);
             else
                 tcu_bench_select(&control, now, last_motor, ready,
                                  ui_requested(action, control.mode));
+        }
+        /* Terrain AUTO. Leaves AUTO (keeping the current level) if the IMU disappears. */
+        if (terrain.enabled) {
+            if (control.stopping || !ready || walking_now) {
+                terrain_assist_disable(&terrain);
+            } else if (!ride_usable) {
+                terrain_assist_disable(&terrain);
+                puts("{\"type\":\"auto_assist\",\"enabled\":false,\"reason\":\"imu\"}");
+            } else {
+                unsigned level = terrain_assist_update(&terrain, &terrain_cfg, now,
+                                                       ride.out.grade_pct, ride.out.grade_valid,
+                                                       ride.out.hold);
+                if (level != control.mode)
+                    tcu_bench_select(&control, now, last_motor, ready, level);
+            }
+        }
+#if CONFIG_LEVO_LOOPOUT_GUARD_DEG > 0
+        if (ride_usable && ride.out.trick_state == TS_LIFT && control.mode > 1 &&
+            ride.out.pitch_rel_deg > CONFIG_LEVO_LOOPOUT_GUARD_DEG) {
+            tcu_bench_select(&control, now, last_motor, ready, 1);
+            if (terrain.enabled)
+                terrain.level = terrain.pending = terrain.base = 1;
+            puts("{\"type\":\"loopout_guard\"}");
+        }
+#endif
+        if (terrain.enabled != shown_auto || terrain.bias != shown_bias) {
+            shown_auto = terrain.enabled;
+            shown_bias = terrain.bias;
+            display_set_auto(shown_auto, shown_bias);
         }
         if (control.mode != selected_mode || walking_now != selected_walk) {
             uint8_t payload[7];

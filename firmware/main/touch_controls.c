@@ -1,6 +1,7 @@
 // AXS5106L register layout and portrait orientation follow Waveshare's
 // ESP32-C6-Touch-LCD-1.47 demo (register 0x01, I2C address 0x63).
 #include "touch_controls.h"
+#include "board_i2c.h"
 #include <stdio.h>
 #include "async_log.h"
 #define printf async_log_printf
@@ -116,7 +117,7 @@ static void touch_task(void *unused) {
                     event_t e = {hold, current, now};
                     if (xQueueSend(events, &e, 0) == pdTRUE) {
                         cancelled = true; // One event per hold; suppress the following release tap.
-                        printf("{\"type\":\"touch_hold_shutdown\",\"held_ms\":%lld}\n",
+                        printf("{\"type\":\"touch_hold\",\"action\":%d,\"held_ms\":%lld}\n", hold,
                                (long long)((now - down_at) / 1000));
                     }
                 }
@@ -136,14 +137,7 @@ void touch_controls_start(void) {
     vTaskDelay(pdMS_TO_TICKS(200));
     gpio_set_level(20, 1);
     vTaskDelay(pdMS_TO_TICKS(300));
-    i2c_master_bus_config_t cfg = {.i2c_port = I2C_NUM_0,
-                                   .sda_io_num = 18,
-                                   .scl_io_num = 19,
-                                   .clk_source = I2C_CLK_SRC_DEFAULT,
-                                   .glitch_ignore_cnt = 7,
-                                   .flags.enable_internal_pullup = true};
-    i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&cfg, &bus));
+    i2c_master_bus_handle_t bus = board_i2c_bus();
     i2c_device_config_t dev = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x63, .scl_speed_hz = 400000};
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev, &device));

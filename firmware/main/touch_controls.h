@@ -10,6 +10,7 @@ typedef enum {
     UI_MINUS,
     UI_PLUS,
     UI_SHUTDOWN,
+    UI_CALIBRATE, /* hold + for 3 s: level IMU calibration */
     UI_NONE = -1
 } ui_action_t;
 void touch_controls_start(void);

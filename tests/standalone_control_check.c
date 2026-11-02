@@ -24,7 +24,9 @@ int main(void) {
     assert(ui_hit(86, 250) == UI_MINUS);
     assert(ui_hold_action(UI_MINUS, 1999999) == UI_NONE);
     assert(ui_hold_action(UI_MINUS, 2000000) == UI_SHUTDOWN);
-    assert(ui_hold_action(UI_PLUS, 3000000) == UI_NONE);
+    assert(ui_hold_action(UI_PLUS, 2999999) == UI_NONE);
+    assert(ui_hold_action(UI_PLUS, 3000000) == UI_CALIBRATE);
+    assert(ui_requested(UI_CALIBRATE, 2) == 2);
     assert(ui_hold_action(UI_SHUTDOWN, 2000000) == UI_SHUTDOWN);
     assert(ui_hold_action(UI_NONE, 3000000) == UI_NONE);
     puts("PASS: standalone holds without USB; startup OFF; stale motor stops; stop latches; "

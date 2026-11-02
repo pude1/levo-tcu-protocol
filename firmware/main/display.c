@@ -18,7 +18,9 @@
 #include "touch_controls.h"
 #include "font.h"
 #include "control_fault.h"
+#include "ride_task.h"
 #include <math.h>
+#include <stdlib.h>
 
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static struct {
@@ -28,6 +30,8 @@ static struct {
 } stats;
 static char mode_label[16], status_label[16];
 static uint32_t display_bitrate = 250000;
+static bool auto_on;
+static int auto_bias;
 static uint16_t *pixels;
 static SemaphoreHandle_t done;
 static esp_lcd_panel_handle_t panel;
@@ -79,6 +83,35 @@ static void large_text(int x, int y, const char *s, int scale, uint16_t color) {
                         }
     }
 }
+/* Trick result banner over the + area for four seconds. */
+static void trick_toast(const ride_status_t *r) {
+    static const uint16_t medal_color[] = {0x4208, 0xcb00, 0xa514, 0xfe60};
+    uint16_t bg = __builtin_bswap16(medal_color[r->result.medal & 3]);
+    for (int y = 88; y < 194; y++)
+        for (int x = 8; x < 164; x++)
+            pixels[y * 172 + x] = bg;
+    const char *name = trick_name(r->event.type);
+    int scale = strlen(name) * 20 <= 150 ? 2 : 1;
+    large_text((172 - (int)strlen(name) * 10 * scale) / 2, 94, name, scale, 0xffff);
+    char line[24];
+    const trick_event_t *e = &r->event;
+    if (e->type == TRICK_HOP)
+        snprintf(line, sizeof(line), "%dcm", (int)(e->height_cm + 0.5f));
+    else
+        snprintf(line, sizeof(line), "%u.%us", (unsigned)(e->duration_ms / 1000),
+                 (unsigned)(e->duration_ms % 1000 / 100));
+    large_text((172 - (int)strlen(line) * 20) / 2, 124, line, 2, 0xffff);
+    if (e->type == TRICK_WHEELIE || e->type == TRICK_MANUAL)
+        snprintf(line, sizeof(line), "%dm %ddeg", (int)(e->distance_m + 0.5f),
+                 (int)(e->max_angle_deg + 0.5f));
+    else if (r->result.spin360 || r->result.spin180)
+        snprintf(line, sizeof(line), "%s %s", r->result.spin360 ? "360!" : "180!",
+                 medal_name(r->result.medal));
+    else
+        snprintf(line, sizeof(line), "%s%s", medal_name(r->result.medal),
+                 r->result.personal_best ? " PB" : "");
+    text((172 - (int)strlen(line) * 10) / 2, 168, line, 0xffff);
+}
 static void display_task(void *arg) {
     (void)arg;
     const char *modes[] = {"OFF", "ECO", "TRAIL", "TURBO"};
@@ -111,7 +144,27 @@ static void display_task(void *arg) {
                 pixels[y * 172 + x] = __builtin_bswap16(colors[mode]);
         large_text((172 - (int)strlen(state == UI_WALK ? "WALK" : modes[mode]) * 20) / 2, 3,
                    state == UI_WALK ? "WALK" : modes[mode], 2, 0xffff);
-        const char *status = !touch_ok                ? "TOUCH OFFLINE"
+        bool show_auto;
+        int bias;
+        portENTER_CRITICAL(&lock);
+        show_auto = auto_on;
+        bias = auto_bias;
+        portEXIT_CRITICAL(&lock);
+        ride_status_t ride = ride_task_status();
+        int64_t now_us = esp_timer_get_time();
+        char auto_label[20], cal_label[16] = "";
+        int g10 = (int)(ride.out.grade_pct * 10.0f);
+        snprintf(auto_label, sizeof(auto_label), "AUTO%s %c%d.%d%%",
+                 bias > 0 ? "+" : bias < 0 ? "-" : "", g10 < 0 ? '-' : '+', abs(g10) / 10,
+                 abs(g10) % 10);
+        if (ride.cal != RIDE_CAL_NONE && now_us - (int64_t)ride.cal_at < 3000000)
+            snprintf(cal_label, sizeof(cal_label), "%s",
+                     ride.cal == RIDE_CAL_RUNNING ? "HOLD STILL"
+                     : ride.cal == RIDE_CAL_OK    ? "LEVEL SAVED"
+                                                  : "LEVEL FAILED");
+        const char *status = cal_label[0]             ? cal_label
+                             : !touch_ok              ? "TOUCH OFFLINE"
+                             : show_auto && state == UI_LIVE ? auto_label
                              : state == UI_WALK       ? "RELEASE TO STOP"
                              : state == UI_WALK_ARMED ? "WALK ARMED"
                              : state == UI_PREVIEW    ? "PREVIEW"
@@ -123,7 +176,16 @@ static void display_task(void *arg) {
         box(8, 204, 156, 108, "", false, enabled);
         large_text(66, 101, "+", 4, enabled ? 0xffff : 0x8410);
         large_text(66, 208, "-", 4, enabled ? 0xffff : 0x8410);
-        text(26, 288, "HOLD 2s: OFF", enabled ? 0xffff : 0x8410);
+        if (ride.imu_ok && state == UI_LIVE && !show_auto) {
+            char grade[20];
+            snprintf(grade, sizeof(grade), "GRADE %c%d.%d%%", g10 < 0 ? '-' : '+', abs(g10) / 10,
+                     abs(g10) % 10);
+            text((172 - (int)strlen(grade) * 10) / 2, 288, grade, 0xffff);
+        } else {
+            text(26, 288, "HOLD 2s: OFF", enabled ? 0xffff : 0x8410);
+        }
+        if (ride.has_event && now_us - (int64_t)ride.event_at < 4000000)
+            trick_toast(&ride);
         flush();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -137,6 +199,12 @@ void display_set_mode(const char *mode, const char *status) {
     portENTER_CRITICAL(&lock);
     memcpy(mode_label, m, sizeof(m));
     memcpy(status_label, s, sizeof(s));
+    portEXIT_CRITICAL(&lock);
+}
+void display_set_auto(bool enabled, int bias) {
+    portENTER_CRITICAL(&lock);
+    auto_on = enabled;
+    auto_bias = bias;
     portEXIT_CRITICAL(&lock);
 }
 void display_set_bitrate(uint32_t bitrate) {

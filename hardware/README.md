@@ -4,6 +4,8 @@ The reference build uses a Waveshare **ESP32-C6-Touch-LCD-1.47**, a 3.3 V CAN tr
 
 ![Completed electronics](../docs/images/assembled-electronics.jpg)
 
+> **Fork:** the ride features use the board's onboard QMI8658 IMU. No wiring changes are needed. Optional upgrades are described in [IMU options](imu-options.md).
+
 ## Wiring schematic
 
 [Open the full schematic](diagrams/reference-schematic.svg).
